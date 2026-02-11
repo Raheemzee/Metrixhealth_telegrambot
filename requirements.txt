@@ -1,8 +1,6 @@
-flask
-openai
-requests
-feedparser
+flask==3.0.3
+openai>=1.30.0
+httpx>=0.27.0
+requests>=2.31.0
+feedparser>=6.0.10
 gunicorn
-
-
-
