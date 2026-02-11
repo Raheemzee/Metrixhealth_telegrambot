@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Health Research Chatbot</title>
+
+  <style>
+    body {
+      font-family: Arial;
+      background: #ffffff;
+      padding: 40px;
+    }
+
+    h1 {
+      text-align: center;
+      font-family: Georgia, "Times New Roman", Times, serif;
+      font-size: x-large;
+      color: #222;
+      margin-bottom: 30px;
+    }
+
+    .chat-container {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      max-width: 750px;
+      margin: auto;
+      box-shadow: 0 0 12px rgba(0,0,0,0.1);
+    }
+
+    .chat-box {
+      margin-top: 20px;
+    }
+
+    .user, .bot {
+      margin: 10px 0;
+    }
+
+    .user {
+      color: #007BFF;
+      font-weight: bold;
+    }
+
+    .bot {
+      color: #28a745;
+      font-weight: bold;
+      white-space: pre-wrap;
+    }
+
+    .controls {
+      margin-top: 25px;
+      text-align: center;
+    }
+
+    button {
+      margin: 5px;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      background: #007BFF;
+      color: white;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    button:disabled {
+      background: gray;
+      cursor: not-allowed;
+    }
+
+    button:hover:enabled {
+      background: #0056b3;
+    }
+
+    #mic-btn.recording {
+      background: red;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(255,0,0,0.6); }
+      70% { box-shadow: 0 0 0 15px rgba(255,0,0,0); }
+      100% { box-shadow: 0 0 0 0 rgba(255,0,0,0); }
+    }
+
+    #status {
+      text-align: center;
+      color: #444;
+      margin-top: 15px;
+      font-style: italic;
+    }
+
+    input[type="text"] {
+      padding: 10px;
+      width: 70%;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 15px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>MediQA – Research-Based Health Assistant</h1>
+
+  <div class="chat-container">
+
+    <h2>Ask Your Health Question</h2>
+
+    <!-- Text Input -->
+    <form action="/get_response" method="post">
+      <input
+        type="text"
+        name="user_input"
+        placeholder="Enter your health question..."
+        required
+      >
+      <button type="submit">Ask</button>
+    </form>
+
+    <!-- Voice Controls -->
+    <div class="controls">
+      <h3>🎤 Voice Mode</h3>
+      <button
+        id="mic-btn"
+        type="button"
+        onmousedown="startRecording(this)"
+        onmouseup="stopRecording(this)"
+        ontouchstart="startRecording(this)"
+        ontouchend="stopRecording(this)">
+        🎙️ Hold to Talk
+      </button>
+    </div>
+
+    <!-- Text Results -->
+    {% if user_input %}
+    <div class="chat-box">
+      <div class="user">You: {{ user_input }}</div>
+      <div class="bot">Bot: {{ chatbot_response }}</div>
+      <button onclick="speak(`{{ chatbot_response }}`, this)">
+        🔊 Listen to Reply
+      </button>
+    </div>
+    {% endif %}
+
+    <!-- Voice Results -->
+    <div id="voice-results" class="chat-box" style="display:none;">
+      <div class="user" id="voice-transcript"></div>
+      <div class="bot" id="voice-response"></div>
+      <button id="voice-play" style="display:none;">
+        🔊 Listen to Reply
+      </button>
+    </div>
+
+    <!-- Fetch Papers -->
+    <div class="controls">
+      <button onclick="fetchPapers()">📥 Fetch Latest Research Papers</button>
+    </div>
+
+  </div>
+
+  <div id="status"></div>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+    let isSpeaking = false;
+
+    function setStatus(msg) {
+      document.getElementById("status").innerText = msg || "";
+    }
+
+    async function startRecording(btn) {
+      if (isRecording || isSpeaking) return;
+
+      isRecording = true;
+      btn.classList.add("recording");
+      btn.innerText = "🎙️ Recording...";
+      setStatus("Recording… release to send");
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      audioChunks = [];
+
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.start();
+    }
+
+    function stopRecording(btn) {
+      if (!isRecording) return;
+
+      isRecording = false;
+      btn.classList.remove("recording");
+      btn.innerText = "🎙️ Hold to Talk";
+      setStatus("Processing…");
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(audioChunks, { type: "audio/webm" });
+        const formData = new FormData();
+        formData.append("audio", blob);
+
+        fetch("/stt", { method: "POST", body: formData })
+          .then(res => res.json())
+          .then(data => {
+            setStatus("");
+            document.getElementById("voice-results").style.display = "block";
+            document.getElementById("voice-transcript").innerText =
+              "You (voice): " + data.transcript;
+            document.getElementById("voice-response").innerText =
+              "Bot: " + data.response;
+
+            const playBtn = document.getElementById("voice-play");
+            playBtn.style.display = "inline-block";
+            playBtn.onclick = () => speak(data.response, playBtn);
+          })
+          .catch(err => {
+            setStatus("Error processing audio");
+            console.error(err);
+          });
+
+        audioChunks = [];
+      };
+
+      mediaRecorder.stop();
+    }
+
+    function speak(text, btn) {
+      if (!text || isSpeaking) return;
+
+      isSpeaking = true;
+      if (btn) btn.disabled = true;
+
+      fetch("/speak_response", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      })
+      .then(res => res.blob())
+      .then(blob => {
+        const audio = new Audio(URL.createObjectURL(blob));
+        audio.playbackRate = 1.6;
+        audio.onended = () => {
+          isSpeaking = false;
+          if (btn) btn.disabled = false;
+        };
+        audio.play();
+      });
+    }
+
+    function fetchPapers() {
+      setStatus("Fetching latest research papers…");
+      fetch("/fetch_papers", { method: "POST" })
+        .then(res => res.json())
+        .then(data => {
+          setStatus(`✅ ${data.added} new papers added`);
+        })
+        .catch(() => {
+          setStatus("Failed to fetch papers");
+        });
+    }
+  </script>
+
+</body>
+</html>
